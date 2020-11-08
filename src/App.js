@@ -1,11 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import { Button, Input } from 'antd'
+import { Button, Input, Progress } from 'antd'
 import axios from 'axios'
 import moment from 'moment'
-import Dropzone from 'react-dropzone'
 import captureVideoFrame from "capture-video-frame"
 import Resizer from 'react-image-file-resizer'
-import person from './assets/person.jpg';
 import './App.css';
 
 const bodyPix = require('@tensorflow-models/body-pix');
@@ -13,11 +11,7 @@ const bodyPix = require('@tensorflow-models/body-pix');
 function App() {
 
   const imageList = useRef([]);
-  const imageUrlList = useRef([]);
-  const [ imageURL, setImageURL ] = useState('')
   const [ videoURL, setVideoURL ] = useState('')
-  const [ imageFile, setImageFlie ] = useState(null)
-  const [ duration, setDuration ] = useState(0)
   const [ isVideoStop, setVideoStop] = useState(false)
 
   const resizeFile = (file, type) => new Promise(resolve => {
@@ -30,51 +24,14 @@ function App() {
   });
 
   const dataUrlToFile = async(dataUrl, fileName) => {
-
     const res = await fetch(dataUrl);
     const blob = await res.blob();
     return new File([blob], fileName, { type: 'image/png' });
   }
 
-  const process = async () => {
-    const img = document.getElementById("image");
-    const net = await bodyPix.load({
-      architecture: 'ResNet50',
-      outputStride: 32,
-      quantBytes: 4
-    });
-    const segmentation = await net.segmentPerson(img, {
-      flipHorizontal: false,
-      internalResolution: 'full',
-      segmentationThreshold: 0.7
-    });
-
-    var formData = new FormData();
-    const imageResize = await resizeFile(imageFile, 'blob')
-    formData.append("file", imageResize);
-    axios.post('http://localhost:3000/tensorflow/uploadImage', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    }).then(function (response) {
-      if (response.data == 'success') {
-        axios.post('http://localhost:3000/tensorflow/uploadData', {
-          data: segmentation.data
-        })
-        .then(function (response) {
-          console.log(response);
-        })
-        .catch(function (error) {
-          console.log(error);
-        });
-      }
-    })
-  }
-
   useEffect(() => {
     let video = document.getElementById('my-video');
     if (video) {
-      video.playbackRate = 0.3
       video.play()
       let frame = null
       const interval = setInterval(() => {
@@ -86,16 +43,18 @@ function App() {
           setVideoStop(true)
           clearInterval(interval)
         }
-      }, 50)
+      }, 33)
     }
   }, [videoURL])
 
   useEffect(async () => {
     if(imageList.current.length > 0) {
+      let startTime = moment().valueOf()
+      console.log('startTime: ', startTime)
       const net = await bodyPix.load({
         architecture: 'ResNet50',
         outputStride: 32,
-        quantBytes: 4
+        quantBytes: 2
       });
       let file = null
       let img
@@ -118,11 +77,12 @@ function App() {
       let dataList = {name: imageName}
 
       for (let i = 0; i < indexArray.length; i++) {
+        console.log('i ', i)
         subArray = indexArray[i]
         formData = new FormData();
         dataList = {name: imageName}
         for (j = 0; j < subArray.length; j++) {
-          if(imageList.current[subArray[j]] != 'data:,') {
+          if(imageList.current[subArray[j]] != 'data:,' && imageList.current[subArray[j]]) {
             file = await dataUrlToFile(imageList.current[subArray[j]], imageName + '_' + count + '.png')
             imageResizeBlob = await resizeFile(file, 'blob')
             imageResizeBlob.name = imageName + '_' + count + '.png'
@@ -131,14 +91,14 @@ function App() {
             img.setAttribute("src", imageList.current[subArray[j]]);
             const segmentation = await net.segmentPerson(img, {
               flipHorizontal: false,
-              internalResolution: 'full',
+              internalResolution: 'medium',
               segmentationThreshold: 0.7
             });
             dataList[count] = segmentation.data
             count += 1
           }
         }
-        await axios({
+        axios({
           method: "POST",
           url: 'http://localhost:3000/tensorflow/uploadImages',
           data: formData,
@@ -146,11 +106,12 @@ function App() {
             "Content-Type": "multipart/form-data"
           }
         })
-        await axios.post('http://localhost:3000/tensorflow/uploadDatas', {
+        axios.post('http://localhost:3000/tensorflow/uploadDatas', {
           data: dataList
         })
+        console.log('sucess')
       }
-     
+      console.log('Time: ', (moment().valueOf() - startTime ) / 1000 + 's')
     }
   }, [isVideoStop])
 
@@ -164,7 +125,6 @@ function App() {
             video.src = URL.createObjectURL(e.target.files[0])
             video.onloadedmetadata = function() {
               window.URL.revokeObjectURL(video.src);
-              setDuration(video.duration);
               const reader = new FileReader();
               reader.readAsDataURL(e.target.files[0]);
               reader.onload = function () {
